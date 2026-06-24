@@ -1,3 +1,6 @@
+[![Alt text for the image](https://github.com/techwithbob/validasiPopUpWarningKMJ/blob/main/WarningPopUpUI.png?raw=true)](https://github.com/techwithbob/validasiPopUpWarningKMJ/blob/main/WarningPopUpUI.png?raw=true)
+[![Alt text for the image](https://github.com/techwithbob/validasiPopUpWarningKMJ/blob/main/WarningPopUpUI-Desain%20Pengalaman.png?raw=true)](https://github.com/techwithbob/validasiPopUpWarningKMJ/blob/main/WarningPopUpUI-Desain%20Pengalaman.png?raw=true)
+
 # Panduan Implementasi Warning Pop-Up Kelengkapan Berkas
 **Klinik Mata Jombang (KMJ) — Tim IT Invel / Khanza**
 
