@@ -1,13 +1,18 @@
 /**
  * BPJS Casemix Verifikator Module — Klinik Mata Jombang (KMJ)
- * Versi: 2.0.0
+ * Versi: 2.1.0
+ *
+ * PERUBAHAN v2.1.0:
+ *  - Tambah parameter `unitKode` di payload
+ *  - BPJS0001 (Pemeriksaan Dokter) TIDAK diwajibkan di unit Ruang Operasi
+ *    karena BPJS0001 hanya terdaftar di Poliklinik Mata (U0115)
+ *    Pasien yang registrasi langsung di OK tidak bisa input BPJS0001
  *
  * PERUBAHAN v2.0.0:
  *  - isInputTindakan (boolean) → tindakanList (array kd_jenis_prw dari billing)
  *  - isUploadBerkas  (boolean) → berkasUploadedList (array kategori berkas yg diupload)
  *  - Logika auto-match: ICD-9 → billing code yang wajib ada (dari CSV jns_perawatan)
  *  - Validasi berkas per kategori, bukan hanya boolean
- *  - BPJS0001 (Pemeriksaan Dokter) SELALU wajib ada di billing
  *
  * KATEGORI BERKAS:
  *  '001' = Berkas SEP
@@ -17,6 +22,15 @@
  *  '005' = Berkas Lab
  *  '006' = Berkas Laporan / Test / Dokumen Tindakan
  */
+
+// ================================================================
+// UNIT RUANG OPERASI — BPJS0001 tidak diwajibkan di unit ini
+// karena BPJS0001 (Pemeriksaan Dokter) hanya terdaftar di Poli (U0115)
+// ================================================================
+const UNIT_RUANG_OPERASI = [
+    'U0025',  // Ruang Operasi KMJ
+    'OK',     // alias alternatif
+];
 
 // ================================================================
 // TABEL KONTROL MURNI — bypass semua warning
@@ -268,11 +282,13 @@ const ICD9_WAJIB_BERKAS_LAB_PREOP = new Set([
  * @param {string[]} payload.icd10List          - Kode ICD-10 diagnosa
  * @param {string[]} payload.icd9List           - Kode ICD-9 prosedur
  * @param {string[]} payload.tindakanList       - kd_jenis_prw yang diinput di billing
- *                                                WAJIB selalu ada: 'BPJS0001' atau 'BPJS0001_S'
  * @param {string[]} payload.berkasUploadedList - Kategori berkas yang sudah diupload
  *                                                ['001'=SEP, '002'=KTP, '003'=KK,
  *                                                 '004'=Kartu Pasien, '005'=Lab, '006'=Laporan]
  * @param {boolean}  payload.isInputResume      - Resume medis sudah diisi?
+ * @param {string}   payload.unitKode           - Kode unit registrasi (opsional)
+ *                                                Contoh: 'U0115'=Poli Mata, 'U0025'=Ruang OK
+ *                                                BPJS0001 tidak diwajibkan di Ruang Operasi
  *
  * @returns {{ isValid, showWarningPopUp, messages, _debug }}
  */
@@ -280,10 +296,14 @@ function validasiKelengkapanPoliMata(payload) {
     const {
         icd10List           = [],
         icd9List            = [],
-        tindakanList        = [],    // BARU: array kd_jenis_prw (billing codes)
-        berkasUploadedList  = [],    // BARU: array kategori berkas yang diupload
+        tindakanList        = [],    // array kd_jenis_prw (billing codes)
+        berkasUploadedList  = [],    // array kategori berkas yang diupload
         isInputResume,
+        unitKode            = '',    // kode unit registrasi pasien (opsional)
     } = payload;
+
+    // Unit Ruang Operasi tidak bisa input BPJS0001 (hanya ada di Poli)
+    const isRuangOperasi = UNIT_RUANG_OPERASI.includes(unitKode);
 
     const messages = [];
 
@@ -320,7 +340,9 @@ function validasiKelengkapanPoliMata(payload) {
                         tindakanList.includes('J000816_S') ||
                         tindakanList.includes('RJ24567');
 
-    if (!adaBPJS0001) {
+    // BPJS0001 hanya diwajibkan di unit Poli — bukan di Ruang Operasi
+    // karena kode billing BPJS0001 hanya terdaftar di unit U0115 (Poli Mata)
+    if (!isRuangOperasi && !adaBPJS0001) {
         messages.push('Pemeriksaan Dokter (BPJS0001) belum diinput di billing');
     }
 
@@ -396,6 +418,8 @@ function validasiKelengkapanPoliMata(payload) {
         showWarningPopUp: messages.length > 0,
         messages,
         _debug: {
+            unitKode,
+            isRuangOperasi,
             berkasWajib,
             berkasUploaded:  berkasUploadedList,
             berkasKurang,
