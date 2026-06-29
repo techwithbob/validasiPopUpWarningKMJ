@@ -230,14 +230,12 @@ const ICD9_LABEL = {
 // ================================================================
 // BERKAS TIER — menentukan kategori berkas yang wajib diupload
 //
-// '001' = SEP BPJS
-// '004' = Kartu Pasien
-// '006' = Laporan / Test / Informed Consent / Laporan Operasi
-// '005' = Berkas Lab (pre-op atau hasil lab DM)
+// '005' = Berkas Lab 
 // ================================================================
 
-// ICD-9 yang wajib ada Berkas Laporan (006) — tindakan dengan dokumentasi
-const ICD9_WAJIB_BERKAS_LAPORAN = new Set([
+// ICD-10 yang wajib ada Berkas
+const ICD10_WAJIB_BERKAS_LAB = new Set([
+    'E11.3', 'E11.35', 'E10.3', 'E14.3',  // DM + komplikasi mata
     // Bedah mayor katarak
     '13.3', '13.11', '13.2', '13.19', '13.41', '13.42', '13.43',
     '13.59', '13.64', '13.65', '13.69', '13.72', '13.9',
@@ -260,13 +258,8 @@ const ICD9_WAJIB_BERKAS_LAPORAN = new Set([
     '97.89', '98.21', '96.51',
 ]);
 
-// ICD-10 yang wajib ada Berkas Lab (005) — DM atau sistemik
-const ICD10_WAJIB_BERKAS_LAB = new Set([
-    'E11.3', 'E11.35', 'E10.3', 'E14.3',  // DM + komplikasi mata
-]);
-
-// ICD-9 bedah mayor yang juga wajib Berkas Lab (pre-op clearance)
-const ICD9_WAJIB_BERKAS_LAB_PREOP = new Set([
+// ICD-9 bedah mayor yang juga wajib Berkas
+const ICD9_WAJIB_BERKAS = new Set([
     '13.41', '13.11', '13.2', '13.59', '13.3', '13.19', '13.42', '13.43',
     '12.64', '12.54', '14.74', '16.39',
 ]);
@@ -283,8 +276,7 @@ const ICD9_WAJIB_BERKAS_LAB_PREOP = new Set([
  * @param {string[]} payload.icd9List           - Kode ICD-9 prosedur
  * @param {string[]} payload.tindakanList       - kd_jenis_prw yang diinput di billing
  * @param {string[]} payload.berkasUploadedList - Kategori berkas yang sudah diupload
- *                                                ['001'=SEP, '002'=KTP, '003'=KK,
- *                                                 '004'=Kartu Pasien, '005'=Lab, '006'=Laporan]
+ *                                                ['005'=Lab]
  * @param {boolean}  payload.isInputResume      - Resume medis sudah diisi?
  * @param {string}   payload.unitKode           - Kode unit registrasi (opsional)
  *                                                Contoh: 'U0115'=Poli Mata, 'U0025'=Ruang OK
@@ -390,10 +382,7 @@ function validasiKelengkapanPoliMata(payload) {
     const berkasKurang = berkasWajib.filter(k => !berkasUploadedList.includes(k));
 
     const BERKAS_LABEL = {
-        '001': 'Berkas SEP (001)',
-        '004': 'Kartu Pasien (004)',
-        '005': 'Berkas Lab (005)',
-        '006': 'Berkas Laporan / Dokumen Tindakan (006)',
+        '005': 'Berkas (005)',
     };
 
     berkasKurang.forEach(function (kode) {
@@ -404,7 +393,7 @@ function validasiKelengkapanPoliMata(payload) {
     // STEP 5: VALIDASI RESUME
     // Wajib untuk bedah mayor dan prosedur invasif mayor
     // ----------------------------------------------------------------
-    const adaBedahMayor = icd9List.some(k => ICD9_WAJIB_BERKAS_LAB_PREOP.has(k)) ||
+    const adaBedahMayor = icd9List.some(k => ICD9_WAJIB_BERKAS.has(k)) ||
                           icd9List.some(k => ['14.24','14.34','14.74','14.75','14.79',
                                               '11.32','11.39','11.51','11.63','12.64','12.54',
                                               '08.23','08.38','08.44','16.39','16.91'].includes(k));
@@ -446,19 +435,11 @@ function tentukanBerkasWajib(icd10List, icd9List) {
         return [];
     }
 
-    // SEP (001) + Kartu Pasien (004) → selalu wajib jika ada tindakan
-    wajib.add('001');
-    wajib.add('004');
-
-    // Berkas Laporan/Test (006) → untuk tindakan yang butuh dokumentasi
-    const butuhLaporan = icd9List.some(k => ICD9_WAJIB_BERKAS_LAPORAN.has(k));
-    if (butuhLaporan) wajib.add('006');
-
-    // Berkas Lab (005) → untuk DM atau pre-op bedah mayor
-    const butuhLab =
+    // Berkas (005) → untuk tindakan yang butuh dokumentasi, DM, atau pre-op bedah mayor
+    const butuhBerkas =
         icd10List.some(k => ICD10_WAJIB_BERKAS_LAB.has(k)) ||
-        icd9List.some(k => ICD9_WAJIB_BERKAS_LAB_PREOP.has(k));
-    if (butuhLab) wajib.add('005');
+        icd9List.some(k => ICD9_WAJIB_BERKAS.has(k));
+    if (butuhBerkas) wajib.add('005');
 
     return Array.from(wajib);
 }
