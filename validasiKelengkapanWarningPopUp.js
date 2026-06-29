@@ -1,6 +1,13 @@
 /**
  * BPJS Casemix Verifikator Module — Klinik Mata Jombang (KMJ)
- * Versi: 2.2.0
+ * Versi: 2.3.0
+ *
+ * PERUBAHAN v2.3.0:
+ *  - Hapus '006' (Berkas INA/Lembar INA) dari semua validasi berkas
+ *    → 006 adalah urusan unit klaim, bukan pelayanan poli
+ *  - Hapus ICD-9 98.21 (Corpus Alienum) dari trigger berkas
+ *    → CA hanya perlu warning tindakan billing, tidak perlu berkas
+ *  - Berkas yang divalidasi sekarang hanya '005' (Hasil Penunjang/Lab)
  *
  * PERUBAHAN v2.2.0:
  *  - Tambah parameter `kodePenjamin` ('BPJS' | 'UMUM')
@@ -27,7 +34,7 @@
  *  '003' = Kartu Keluarga      ← tidak divalidasi
  *  '004' = Kartu Pasien        ← tidak divalidasi
  *  '005' = Berkas Hasil Penunjang / Lab  ← DIVALIDASI
- *  '006' = Berkas INA / Lembar INA  ← DIVALIDASI
+ *  '006' = Berkas INA / Lembar INA  ← tidak divalidasi (urusan unit klaim)
  */
 
 // ================================================================
@@ -263,24 +270,8 @@ const ICD9_TRIGGER_005 = new Set([
     '95.02',  // Biometri
 ]);
 
-// ICD-9 tindakan yang wajib Berkas INA → wajib upload '006'
-// (tindakan minor poli + bedah mayor)
-const ICD9_TRIGGER_006 = new Set([
-    // Minor poli
-    '08.09', '08.20', '08.21', '08.22', '08.93',
-    '10.31', '10.42', '10.44', '10.6', '10.91',
-    '97.89', '98.21', '96.51',
-    // Palpebra mayor
-    '08.23', '08.38', '08.44',
-    // Bedah mata semua
-    '11.32', '11.39', '11.51', '11.53', '11.59', '11.63', '11.79', '11.99',
-    '12.12', '12.14', '12.32', '12.33', '12.35', '12.39',
-    '12.54', '12.64', '12.81', '12.82', '12.85', '12.91', '12.92', '12.97',
-    '13.3',  '13.11', '13.2',  '13.19', '13.41', '13.42', '13.43',
-    '13.59', '13.64', '13.65', '13.69', '13.72', '13.9',
-    '14.24', '14.34', '14.74', '14.75', '14.79',
-    '16.39', '16.91', '83.39',
-]);
+// ICD9_TRIGGER_006 dihapus — Berkas INA/Lembar INA (006) bukan urusan poli
+// '006' hanya diisi oleh unit klaim saat generate PDF INA-CBG
 
 // ICD-9 bedah mayor → wajib '005' (pre-op lab) DAN '006' (laporan operasi)
 const ICD9_BEDAH_MAYOR = new Set([
@@ -419,7 +410,6 @@ function validasiKelengkapanPoliMata(payload) {
 
     const BERKAS_LABEL = {
         '005': 'Berkas Hasil Penunjang (005)',
-        '006': 'Berkas INA / Lembar INA (006)',
     };
 
     berkasKurang.forEach(function (kode) {
@@ -457,9 +447,8 @@ function validasiKelengkapanPoliMata(payload) {
 // ================================================================
 // HELPER: Tentukan kategori berkas yang wajib ada
 //
-// Return array berisi subset dari ['005', '006']:
-//   '005' = Berkas Hasil Penunjang / Lab
-//   '006' = Berkas INA / Lembar INA
+// Hanya '005' (Berkas Hasil Penunjang / Lab) yang divalidasi.
+// '006' (Berkas INA/Lembar INA) tidak divalidasi — urusan unit klaim.
 // ================================================================
 function tentukanBerkasWajib(icd10List, icd9List) {
     const wajib = new Set();
@@ -475,15 +464,9 @@ function tentukanBerkasWajib(icd10List, icd9List) {
         wajib.add('005');
     }
 
-    // Bedah mayor → wajib '005' (pre-op lab) DAN '006' (Berkas INA)
+    // Bedah mayor → wajib '005' (pre-op lab)
     if (icd9List.some(k => ICD9_BEDAH_MAYOR.has(k))) {
         wajib.add('005');
-        wajib.add('006');
-    }
-
-    // Tindakan non-bedah → wajib Berkas INA '006'
-    if (icd9List.some(k => ICD9_TRIGGER_006.has(k) && !ICD9_BEDAH_MAYOR.has(k))) {
-        wajib.add('006');
     }
 
     return Array.from(wajib);
