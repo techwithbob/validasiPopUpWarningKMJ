@@ -8,7 +8,7 @@
  *  - Hapus '001' (SEP) dan '004' (Kartu Pasien) dari daftar berkas wajib warning
  *    → hanya '005' dan '006' yang relevan untuk validasi klinis
  *  - Pisah logika berkas: '005' untuk diagnostik penunjang & pre-op lab,
- *    '006' untuk laporan tindakan / bedah
+ *    '006' untuk Berkas INA / Lembar INA
  *  - BUGFIX: ICD10_WAJIB_BERKAS_LAB sebelumnya berisi kode ICD-9 (salah variabel)
  *    → sudah dipisah menjadi ICD10_TRIGGER_LAB dan ICD9_TRIGGER_005 dan ICD9_TRIGGER_006
  *
@@ -27,7 +27,7 @@
  *  '003' = Kartu Keluarga      ← tidak divalidasi
  *  '004' = Kartu Pasien        ← tidak divalidasi
  *  '005' = Berkas Hasil Penunjang / Lab  ← DIVALIDASI
- *  '006' = Berkas Laporan / Dokumen Tindakan  ← DIVALIDASI
+ *  '006' = Berkas INA / Lembar INA  ← DIVALIDASI
  */
 
 // ================================================================
@@ -239,7 +239,7 @@ const ICD9_LABEL = {
 //
 // Hanya 2 kategori yang divalidasi:
 //   '005' = Berkas Hasil Penunjang / Lab
-//   '006' = Berkas Laporan / Dokumen Tindakan
+//   '006' = Berkas INA / Lembar INA
 //
 // '001','002','003','004' = administrasi → tidak divalidasi lewat pop-up
 // ================================================================
@@ -263,7 +263,7 @@ const ICD9_TRIGGER_005 = new Set([
     '95.02',  // Biometri
 ]);
 
-// ICD-9 tindakan yang wajib ada berkas laporan/dokumen → wajib upload '006'
+// ICD-9 tindakan yang wajib Berkas INA → wajib upload '006'
 // (tindakan minor poli + bedah mayor)
 const ICD9_TRIGGER_006 = new Set([
     // Minor poli
@@ -306,7 +306,7 @@ const ICD9_BEDAH_MAYOR = new Set([
  * @param {string[]} payload.icd9List           - Kode ICD-9 prosedur
  * @param {string[]} payload.tindakanList       - kd_jenis_prw yang diinput di billing
  * @param {string[]} payload.berkasUploadedList - Kategori berkas yang sudah diupload
- *                                                ['005'=Hasil Penunjang, '006'=Laporan Tindakan]
+ *                                                ['005'=Hasil Penunjang, '006'=Berkas INA/Lembar INA]
  * @param {boolean}  payload.isInputResume      - Resume medis sudah diisi?
  * @param {string}   payload.unitKode           - Kode unit registrasi (opsional)
  *                                                Contoh: 'U0115'=Poli Mata, 'U0025'=Ruang OK
@@ -419,7 +419,7 @@ function validasiKelengkapanPoliMata(payload) {
 
     const BERKAS_LABEL = {
         '005': 'Berkas Hasil Penunjang (005)',
-        '006': 'Berkas Laporan / Dokumen Tindakan (006)',
+        '006': 'Berkas INA / Lembar INA (006)',
     };
 
     berkasKurang.forEach(function (kode) {
@@ -459,7 +459,7 @@ function validasiKelengkapanPoliMata(payload) {
 //
 // Return array berisi subset dari ['005', '006']:
 //   '005' = Berkas Hasil Penunjang / Lab
-//   '006' = Berkas Laporan / Dokumen Tindakan
+//   '006' = Berkas INA / Lembar INA
 // ================================================================
 function tentukanBerkasWajib(icd10List, icd9List) {
     const wajib = new Set();
@@ -475,13 +475,13 @@ function tentukanBerkasWajib(icd10List, icd9List) {
         wajib.add('005');
     }
 
-    // Bedah mayor → wajib '005' (pre-op lab) DAN '006' (laporan operasi)
+    // Bedah mayor → wajib '005' (pre-op lab) DAN '006' (Berkas INA)
     if (icd9List.some(k => ICD9_BEDAH_MAYOR.has(k))) {
         wajib.add('005');
         wajib.add('006');
     }
 
-    // Tindakan non-bedah yang butuh dokumen → wajib '006'
+    // Tindakan non-bedah → wajib Berkas INA '006'
     if (icd9List.some(k => ICD9_TRIGGER_006.has(k) && !ICD9_BEDAH_MAYOR.has(k))) {
         wajib.add('006');
     }
@@ -527,7 +527,7 @@ validasiKelengkapanPoliMata({
 });
 // → messages:
 //   'Berkas Hasil Penunjang (005) belum diupload'  ← pre-op lab
-//   'Berkas Laporan / Dokumen Tindakan (006) belum diupload'
+//   'Berkas INA / Lembar INA (006) belum diupload'
 //   'Resume belum di input'
 
 // ── KASUS 4: PHACO di Ruang OK (U0025), BPJS0001 tidak bisa diinput ──
@@ -586,7 +586,7 @@ validasiKelengkapanPoliMata({
 // → messages:
 //   'Berkas SEP (001) belum diupload'
 //   'Kartu Pasien (004) belum diupload'
-//   'Berkas Laporan / Dokumen Tindakan (006) belum diupload'
+//   'Berkas INA / Lembar INA (006) belum diupload'
 
 */
 
