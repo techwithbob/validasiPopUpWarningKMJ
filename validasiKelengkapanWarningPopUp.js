@@ -1,26 +1,33 @@
 /**
  * BPJS Casemix Verifikator Module — Klinik Mata Jombang (KMJ)
- * Versi: 2.1.0
+ * Versi: 2.2.0
+ *
+ * PERUBAHAN v2.2.0:
+ *  - Tambah parameter `kodePenjamin` ('BPJS' | 'UMUM')
+ *    Pasien UMUM → bypass semua warning (tidak ada kewajiban BPJS casemix)
+ *  - Hapus '001' (SEP) dan '004' (Kartu Pasien) dari daftar berkas wajib warning
+ *    → hanya '005' dan '006' yang relevan untuk validasi klinis
+ *  - Pisah logika berkas: '005' untuk diagnostik penunjang & pre-op lab,
+ *    '006' untuk laporan tindakan / bedah
+ *  - BUGFIX: ICD10_WAJIB_BERKAS_LAB sebelumnya berisi kode ICD-9 (salah variabel)
+ *    → sudah dipisah menjadi ICD10_TRIGGER_LAB dan ICD9_TRIGGER_005 dan ICD9_TRIGGER_006
  *
  * PERUBAHAN v2.1.0:
  *  - Tambah parameter `unitKode` di payload
- *  - BPJS0001 (Pemeriksaan Dokter) TIDAK diwajibkan di unit Ruang Operasi
- *    karena BPJS0001 hanya terdaftar di Poliklinik Mata (U0115)
- *    Pasien yang registrasi langsung di OK tidak bisa input BPJS0001
+ *  - BPJS0001 tidak diwajibkan di Ruang Operasi (U0025)
  *
  * PERUBAHAN v2.0.0:
  *  - isInputTindakan (boolean) → tindakanList (array kd_jenis_prw dari billing)
  *  - isUploadBerkas  (boolean) → berkasUploadedList (array kategori berkas yg diupload)
  *  - Logika auto-match: ICD-9 → billing code yang wajib ada (dari CSV jns_perawatan)
- *  - Validasi berkas per kategori, bukan hanya boolean
  *
- * KATEGORI BERKAS:
- *  '001' = Berkas SEP
- *  '002' = KTP
- *  '003' = Kartu Keluarga
- *  '004' = Kartu Pasien
- *  '005' = Berkas Lab
- *  '006' = Berkas Laporan / Test / Dokumen Tindakan
+ * KATEGORI BERKAS (referensi):
+ *  '001' = Berkas SEP          ← tidak divalidasi (administrasi, bukan klinis)
+ *  '002' = KTP                 ← tidak divalidasi
+ *  '003' = Kartu Keluarga      ← tidak divalidasi
+ *  '004' = Kartu Pasien        ← tidak divalidasi
+ *  '005' = Berkas Hasil Penunjang / Lab  ← DIVALIDASI
+ *  '006' = Berkas Laporan / Dokumen Tindakan  ← DIVALIDASI
  */
 
 // ================================================================
@@ -228,40 +235,61 @@ const ICD9_LABEL = {
 };
 
 // ================================================================
-// BERKAS TIER — menentukan kategori berkas yang wajib diupload
+// BERKAS — menentukan kategori berkas yang wajib diupload
 //
-// '005' = Berkas Lab 
+// Hanya 2 kategori yang divalidasi:
+//   '005' = Berkas Hasil Penunjang / Lab
+//   '006' = Berkas Laporan / Dokumen Tindakan
+//
+// '001','002','003','004' = administrasi → tidak divalidasi lewat pop-up
 // ================================================================
 
-// ICD-10 yang wajib ada Berkas
-const ICD10_WAJIB_BERKAS_LAB = new Set([
-    'E11.3', 'E11.35', 'E10.3', 'E14.3',  // DM + komplikasi mata
-    // Bedah mayor katarak
-    '13.3', '13.11', '13.2', '13.19', '13.41', '13.42', '13.43',
-    '13.59', '13.64', '13.65', '13.69', '13.72', '13.9',
-    // Kornea
-    '11.32', '11.39', '11.51', '11.53', '11.59', '11.63', '11.79', '11.99',
-    // Glaukoma bedah
-    '12.12', '12.14', '12.32', '12.33', '12.35', '12.39',
-    '12.54', '12.64', '12.81', '12.82', '12.85', '12.91', '12.92', '12.97',
-    // Vitreoretinal + laser
-    '14.24', '14.34', '14.74', '14.75', '14.79',
-    // Invasif lainnya
-    '16.91', '16.39', '83.39',
-    // Palpebra operatif
-    '08.23', '08.38', '08.44',
-    // Diagnostik dengan hasil cetak
-    '09.19', '95.11', '95.12', '95.13', '95.16', '95.26',
-    // Minor tindakan dengan dokumen
+// ICD-10 yang memicu wajib '005' (Lab/Hasil Penunjang)
+// Murni kode ICD-10 saja — DM + komplikasi mata
+const ICD10_TRIGGER_LAB = new Set([
+    'E10.3', 'E10.35', 'E11.3', 'E11.35', 'E14.3',  // DM + retinopati/komplikasi mata
+]);
+
+// ICD-9 diagnostik penunjang yang menghasilkan printout → wajib upload '005'
+// (OCT, Perimetri, USG, Foto Fundus, Fluorescein, Dry Eye Test)
+const ICD9_TRIGGER_005 = new Set([
+    '09.19',  // Dry Eye Test / Schirmer
+    '95.11',  // Foto Fundus
+    '95.12',  // Fluorescein Test
+    '95.13',  // USG Mata
+    '95.16',  // OCT
+    '95.26',  // Perimetri / Visual Field
+    '16.21',  // Funduskopi / TMG
+    '95.02',  // Biometri
+]);
+
+// ICD-9 tindakan yang wajib ada berkas laporan/dokumen → wajib upload '006'
+// (tindakan minor poli + bedah mayor)
+const ICD9_TRIGGER_006 = new Set([
+    // Minor poli
     '08.09', '08.20', '08.21', '08.22', '08.93',
     '10.31', '10.42', '10.44', '10.6', '10.91',
     '97.89', '98.21', '96.51',
+    // Palpebra mayor
+    '08.23', '08.38', '08.44',
+    // Bedah mata semua
+    '11.32', '11.39', '11.51', '11.53', '11.59', '11.63', '11.79', '11.99',
+    '12.12', '12.14', '12.32', '12.33', '12.35', '12.39',
+    '12.54', '12.64', '12.81', '12.82', '12.85', '12.91', '12.92', '12.97',
+    '13.3',  '13.11', '13.2',  '13.19', '13.41', '13.42', '13.43',
+    '13.59', '13.64', '13.65', '13.69', '13.72', '13.9',
+    '14.24', '14.34', '14.74', '14.75', '14.79',
+    '16.39', '16.91', '83.39',
 ]);
 
-// ICD-9 bedah mayor yang juga wajib Berkas
-const ICD9_WAJIB_BERKAS = new Set([
-    '13.41', '13.11', '13.2', '13.59', '13.3', '13.19', '13.42', '13.43',
-    '12.64', '12.54', '14.74', '16.39',
+// ICD-9 bedah mayor → wajib '005' (pre-op lab) DAN '006' (laporan operasi)
+const ICD9_BEDAH_MAYOR = new Set([
+    '13.41', '13.11', '13.2',  '13.59', '13.3',  '13.19', '13.42', '13.43',
+    '13.65', '13.69', '13.72', '13.9',
+    '11.32', '11.39', '11.51', '11.53', '11.59', '11.63', '11.79', '11.99',
+    '12.54', '12.64', '14.74', '16.39',
+    '08.23', '08.38', '08.44',
+    '14.24', '14.34', '14.75', '14.79',
 ]);
 
 // ================================================================
@@ -272,11 +300,13 @@ const ICD9_WAJIB_BERKAS = new Set([
  * Validasi kelengkapan berkas kunjungan poli mata.
  *
  * @param {Object}   payload
+ * @param {string}   payload.kodePenjamin       - 'BPJS' atau 'UMUM'
+ *                                                UMUM → bypass semua warning
  * @param {string[]} payload.icd10List          - Kode ICD-10 diagnosa
  * @param {string[]} payload.icd9List           - Kode ICD-9 prosedur
  * @param {string[]} payload.tindakanList       - kd_jenis_prw yang diinput di billing
  * @param {string[]} payload.berkasUploadedList - Kategori berkas yang sudah diupload
- *                                                ['005'=Lab]
+ *                                                ['005'=Hasil Penunjang, '006'=Laporan Tindakan]
  * @param {boolean}  payload.isInputResume      - Resume medis sudah diisi?
  * @param {string}   payload.unitKode           - Kode unit registrasi (opsional)
  *                                                Contoh: 'U0115'=Poli Mata, 'U0025'=Ruang OK
@@ -286,13 +316,19 @@ const ICD9_WAJIB_BERKAS = new Set([
  */
 function validasiKelengkapanPoliMata(payload) {
     const {
+        kodePenjamin        = 'BPJS', // 'BPJS' atau 'UMUM'
         icd10List           = [],
         icd9List            = [],
-        tindakanList        = [],    // array kd_jenis_prw (billing codes)
-        berkasUploadedList  = [],    // array kategori berkas yang diupload
+        tindakanList        = [],     // array kd_jenis_prw (billing codes)
+        berkasUploadedList  = [],     // array kategori berkas yang diupload
         isInputResume,
-        unitKode            = '',    // kode unit registrasi pasien (opsional)
+        unitKode            = '',     // kode unit registrasi pasien (opsional)
     } = payload;
+
+    // Pasien UMUM tidak ada kewajiban casemix BPJS — bypass semua
+    if (kodePenjamin === 'UMUM') {
+        return { isValid: true, showWarningPopUp: false, messages: [] };
+    }
 
     // Unit Ruang Operasi tidak bisa input BPJS0001 (hanya ada di Poli)
     const isRuangOperasi = UNIT_RUANG_OPERASI.includes(unitKode);
@@ -382,7 +418,8 @@ function validasiKelengkapanPoliMata(payload) {
     const berkasKurang = berkasWajib.filter(k => !berkasUploadedList.includes(k));
 
     const BERKAS_LABEL = {
-        '005': 'Berkas (005)',
+        '005': 'Berkas Hasil Penunjang (005)',
+        '006': 'Berkas Laporan / Dokumen Tindakan (006)',
     };
 
     berkasKurang.forEach(function (kode) {
@@ -393,10 +430,7 @@ function validasiKelengkapanPoliMata(payload) {
     // STEP 5: VALIDASI RESUME
     // Wajib untuk bedah mayor dan prosedur invasif mayor
     // ----------------------------------------------------------------
-    const adaBedahMayor = icd9List.some(k => ICD9_WAJIB_BERKAS.has(k)) ||
-                          icd9List.some(k => ['14.24','14.34','14.74','14.75','14.79',
-                                              '11.32','11.39','11.51','11.63','12.64','12.54',
-                                              '08.23','08.38','08.44','16.39','16.91'].includes(k));
+    const adaBedahMayor = icd9List.some(k => ICD9_BEDAH_MAYOR.has(k));
 
     if (adaBedahMayor && !isInputResume) {
         messages.push('Resume belum di input');
@@ -407,6 +441,7 @@ function validasiKelengkapanPoliMata(payload) {
         showWarningPopUp: messages.length > 0,
         messages,
         _debug: {
+            kodePenjamin,
             unitKode,
             isRuangOperasi,
             berkasWajib,
@@ -421,25 +456,35 @@ function validasiKelengkapanPoliMata(payload) {
 
 // ================================================================
 // HELPER: Tentukan kategori berkas yang wajib ada
+//
+// Return array berisi subset dari ['005', '006']:
+//   '005' = Berkas Hasil Penunjang / Lab
+//   '006' = Berkas Laporan / Dokumen Tindakan
 // ================================================================
 function tentukanBerkasWajib(icd10List, icd9List) {
     const wajib = new Set();
 
-    // Cek apakah ada tindakan yang perlu berkas sama sekali
-    const adaTindakanBerkas = icd9List.some(k =>
-        !ICD9_PEMERIKSAAN_DASAR.includes(k) && !k.startsWith('95.0')
-    );
-
-    if (!adaTindakanBerkas && icd9List.length > 0) {
-        // Hanya pemeriksaan dasar, tidak ada berkas wajib
-        return [];
+    // ICD-9 diagnostik penunjang (OCT, Perimetri, USG, Foto Fundus, dll)
+    // → wajib '005' (upload hasil print penunjang)
+    if (icd9List.some(k => ICD9_TRIGGER_005.has(k))) {
+        wajib.add('005');
     }
 
-    // Berkas (005) → untuk tindakan yang butuh dokumentasi, DM, atau pre-op bedah mayor
-    const butuhBerkas =
-        icd10List.some(k => ICD10_WAJIB_BERKAS_LAB.has(k)) ||
-        icd9List.some(k => ICD9_WAJIB_BERKAS.has(k));
-    if (butuhBerkas) wajib.add('005');
+    // ICD-10 DM + komplikasi mata → wajib '005' (hasil lab HbA1c, GDS, dll)
+    if (icd10List.some(k => ICD10_TRIGGER_LAB.has(k))) {
+        wajib.add('005');
+    }
+
+    // Bedah mayor → wajib '005' (pre-op lab) DAN '006' (laporan operasi)
+    if (icd9List.some(k => ICD9_BEDAH_MAYOR.has(k))) {
+        wajib.add('005');
+        wajib.add('006');
+    }
+
+    // Tindakan non-bedah yang butuh dokumen → wajib '006'
+    if (icd9List.some(k => ICD9_TRIGGER_006.has(k) && !ICD9_BEDAH_MAYOR.has(k))) {
+        wajib.add('006');
+    }
 
     return Array.from(wajib);
 }
@@ -449,45 +494,57 @@ function tentukanBerkasWajib(icd10List, icd9List) {
 // ================================================================
 /*
 
-// ── KASUS 1: Katarak PHACO, berkas laporan + lab belum upload ──
+// ── KASUS 1: Pasien UMUM → bypass semua ──
 validasiKelengkapanPoliMata({
+    kodePenjamin:       'UMUM',
+    icd10List:          ['H25.9'],
+    icd9List:           ['13.41'],
+    tindakanList:       [],
+    berkasUploadedList: [],
+    isInputResume:      false,
+});
+// → { isValid: true, showWarningPopUp: false, messages: [] }
+
+// ── KASUS 2: OCT + Perimetri BPJS, belum upload berkas penunjang ──
+validasiKelengkapanPoliMata({
+    kodePenjamin:       'BPJS',
+    icd10List:          ['H40.1'],
+    icd9List:           ['95.16', '95.26'],
+    tindakanList:       ['BPJS0001', 'BPJS016', 'RJ24572'],
+    berkasUploadedList: [],               // ❌ belum upload hasil OCT/Perimetri
+    isInputResume:      false,
+});
+// → messages: ['Berkas Hasil Penunjang (005) belum diupload']
+
+// ── KASUS 3: PHACO BPJS, hanya KTP diupload ──
+validasiKelengkapanPoliMata({
+    kodePenjamin:       'BPJS',
     icd10List:          ['H25.9'],
     icd9List:           ['13.41', '13.71'],
-    tindakanList:       ['BPJS0001', 'BPJS001'],  // ✅ ada billing katarak
-    berkasUploadedList: ['002'],                   // ❌ hanya KTP, belum ada SEP/kartu/lab/laporan
+    tindakanList:       ['BPJS0001', 'BPJS001'],
+    berkasUploadedList: ['002'],          // ❌ hanya KTP — 005 & 006 belum
     isInputResume:      false,
 });
 // → messages:
-//   'Berkas SEP (001) belum diupload'
-//   'Kartu Pasien (004) belum diupload'
-//   'Berkas Lab (005) belum diupload'          ← pre-op lab wajib
+//   'Berkas Hasil Penunjang (005) belum diupload'  ← pre-op lab
 //   'Berkas Laporan / Dokumen Tindakan (006) belum diupload'
 //   'Resume belum di input'
 
-// ── KASUS 2: Chalazion eksisi, billing sudah ada, laporan belum ──
+// ── KASUS 4: PHACO di Ruang OK (U0025), BPJS0001 tidak bisa diinput ──
 validasiKelengkapanPoliMata({
-    icd10List:          ['H00.1'],
-    icd9List:           ['08.21'],
-    tindakanList:       ['BPJS0001', 'BPJS009'],  // ✅ billing chalazion ada
-    berkasUploadedList: ['001', '004'],            // ❌ laporan belum
-    isInputResume:      false,                     // ✅ tidak diwajibkan (bukan bedah mayor)
-});
-// → messages:
-//   'Berkas Laporan / Dokumen Tindakan (006) belum diupload'
-
-// ── KASUS 3: PHACO tapi BPJS0001 lupa diinput ──
-validasiKelengkapanPoliMata({
+    kodePenjamin:       'BPJS',
     icd10List:          ['H25.9'],
     icd9List:           ['13.41'],
-    tindakanList:       ['BPJS001'],              // ❌ billing katarak ada tapi BPJS0001 tidak ada
-    berkasUploadedList: ['001', '004', '005', '006'],
+    tindakanList:       ['BPJS001'],      // tidak ada BPJS0001 (wajar, ini OK)
+    berkasUploadedList: ['005', '006'],
     isInputResume:      true,
+    unitKode:           'U0025',
 });
-// → messages:
-//   'Pemeriksaan Dokter (BPJS0001) belum diinput di billing'
+// → { isValid: true, showWarningPopUp: false, messages: [] }
 
-// ── KASUS 4: Kontrol post-op → bypass semua ──
+// ── KASUS 5: Kontrol post-op Z09.8 → bypass semua ──
 validasiKelengkapanPoliMata({
+    kodePenjamin:       'BPJS',
     icd10List:          ['Z09.8'],
     icd9List:           [],
     tindakanList:       [],
