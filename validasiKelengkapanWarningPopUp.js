@@ -1,6 +1,14 @@
 /**
  * BPJS Casemix Verifikator Module — Klinik Mata Jombang (KMJ)
- * Versi: 2.3.0
+ * Versi: 2.4.0
+ *
+ * PERUBAHAN v2.4.0:
+ *  - Tambah parameter `laporanInputList` (array nama laporan yang sudah diisi)
+ *  - Tambah `ICD9_TO_LAPORAN` mapping: ICD-9 → nama template laporan tindakan di Invel
+ *  - Warning baru: laporan tindakan yang belum diisi (skip)
+ *  - Fix: Laser PRP (14.24) & Laser Barrage (14.34) tidak memerlukan pre-op lab (005)
+ *    → sesuai masukan nakes, laser masuk kategori "tindakan + laporan, tanpa berkas"
+ *  - Fix: berkas 005 hanya untuk pemeriksaan penunjang (OCT/USG/Perimetri/dll) & pre-op OK besar
  *
  * PERUBAHAN v2.3.0:
  *  - Hapus '006' (Berkas INA/Lembar INA) dari semua validasi berkas
@@ -273,14 +281,72 @@ const ICD9_TRIGGER_005 = new Set([
 // ICD9_TRIGGER_006 dihapus — Berkas INA/Lembar INA (006) bukan urusan poli
 // '006' hanya diisi oleh unit klaim saat generate PDF INA-CBG
 
-// ICD-9 bedah mayor → wajib '005' (pre-op lab) DAN '006' (laporan operasi)
+// ================================================================
+// MAPPING ICD-9 → NAMA LAPORAN TINDAKAN
+//
+// Nama harus PERSIS sama dengan nama template laporan di sistem Invel
+// agar IT bisa match string dari `laporanInputList`
+//
+// null = tidak ada template laporan (hanya butuh tindakan billing)
+// ================================================================
+const ICD9_TO_LAPORAN = {
+    // Tindakan minor poli — laporan WAJIB, berkas 005 TIDAK diperlukan
+    '08.09': 'Tindakan Operasi Eksisi Kalazion',       // Hordeolum
+    '08.20': 'Tindakan Lithiasis',
+    '08.21': 'Tindakan Operasi Eksisi Kalazion',       // Eksisi Chalazion
+    '08.22': 'Tindakan Ekspresi Kelenjar Meibom',      // Granuloma / MGD
+    '08.93': 'Tindakan Epilasi (Mencabut Bulu Mata)',
+    '13.64': 'Tindakan YAG Laser',
+    '14.24': 'Tindakan Laser',                         // Laser PRP
+    '14.34': 'Tindakan Laser',                         // Laser Barrage
+
+    // Tindakan / bedah yang juga butuh pre-op lab (berkas 005) + laporan
+    '08.23': 'Operasi Eksisi Tumor Palpebra',
+    '08.38': 'Operasi Entropion',
+    '08.44': 'Operasi Entropion',
+    '10.31': 'Operasi Eksisi Kista Konjungtiva',
+    '10.42': 'Operasi Eksisi Tumor Palpebra',
+    '11.32': 'Operasi Eksisi Pterigium + Graft',
+    '11.39': 'Tindakan Eksisi Pterigium',
+    '11.53': 'Operasi AMT Graft',
+    '11.59': 'Operasi AMT Graft',
+    '12.14': 'Tindakan Iridektomi',
+    '13.11': 'Operasi ICCE',
+    '13.3':  'Operasi ICCE',
+    '13.2':  'Operasi ICCE',
+    '13.41': 'Operasi Fokoemulsifikasi',
+    '13.42': 'Operasi Fokoemulsifikasi',
+    '13.43': 'Operasi Fokoemulsifikasi',
+    '13.59': 'Operasi SICS',
+    '13.69': 'Tindakan Exchange IOL',
+    '13.72': 'Tindakan Secondary Implant',
+    '14.75': 'Tindakan Injeksi Intravitreal',
+    '14.79': 'Tindakan Injeksi Intravitreal',
+
+    // Tindakan tanpa template laporan — tidak ada warning laporan
+    '96.51': null,  // Irigasi Mata
+    '97.89': null,  // Aff Jahitan RJ
+    '98.21': null,  // Corpus Alienum
+    '10.91': null,  // Injeksi Subkonjungtiva
+    '10.6':  null,  // Hecting Konjungtiva
+    '16.91': null,  // Injeksi Subtenon
+};
+
+// ICD-9 bedah mayor → wajib pre-op lab (berkas 005) + resume
+// CATATAN: laser (14.24, 14.34) TIDAK masuk sini — tidak perlu pre-op lab
 const ICD9_BEDAH_MAYOR = new Set([
+    // Katarak OK
     '13.41', '13.11', '13.2',  '13.59', '13.3',  '13.19', '13.42', '13.43',
     '13.65', '13.69', '13.72', '13.9',
+    // Kornea
     '11.32', '11.39', '11.51', '11.53', '11.59', '11.63', '11.79', '11.99',
-    '12.54', '12.64', '14.74', '16.39',
-    '08.23', '08.38', '08.44',
-    '14.24', '14.34', '14.75', '14.79',
+    // Glaukoma bedah
+    '12.54', '12.64',
+    // Vitreoretinal / Injeksi OK
+    '14.74', '14.75', '14.79',
+    // Lain-lain OK
+    '16.39', '08.23', '08.38', '08.44',
+    // Laser tidak masuk sini (poli, tidak perlu pre-op lab / resume)
 ]);
 
 // ================================================================
@@ -297,7 +363,10 @@ const ICD9_BEDAH_MAYOR = new Set([
  * @param {string[]} payload.icd9List           - Kode ICD-9 prosedur
  * @param {string[]} payload.tindakanList       - kd_jenis_prw yang diinput di billing
  * @param {string[]} payload.berkasUploadedList - Kategori berkas yang sudah diupload
- *                                                ['005'=Hasil Penunjang, '006'=Berkas INA/Lembar INA]
+ *                                                ['005'=Hasil Penunjang/Lab]
+ * @param {string[]} payload.laporanInputList   - Nama laporan tindakan yang sudah diisi di Invel
+ *                                                Contoh: ['Operasi Fokoemulsifikasi', 'Tindakan YAG Laser']
+ *                                                Nama harus PERSIS sama dengan template laporan Invel
  * @param {boolean}  payload.isInputResume      - Resume medis sudah diisi?
  * @param {string}   payload.unitKode           - Kode unit registrasi (opsional)
  *                                                Contoh: 'U0115'=Poli Mata, 'U0025'=Ruang OK
@@ -312,6 +381,7 @@ function validasiKelengkapanPoliMata(payload) {
         icd9List            = [],
         tindakanList        = [],     // array kd_jenis_prw (billing codes)
         berkasUploadedList  = [],     // array kategori berkas yang diupload
+        laporanInputList    = [],     // array nama laporan tindakan yang sudah diisi
         isInputResume,
         unitKode            = '',     // kode unit registrasi pasien (opsional)
     } = payload;
@@ -417,8 +487,38 @@ function validasiKelengkapanPoliMata(payload) {
     });
 
     // ----------------------------------------------------------------
-    // STEP 5: VALIDASI RESUME
-    // Wajib untuk bedah mayor dan prosedur invasif mayor
+    // STEP 5: VALIDASI LAPORAN TINDAKAN
+    //
+    // Cek tiap ICD-9: apakah laporan tindakannya sudah diisi?
+    // Laporan dicocokkan berdasarkan nama template (string match)
+    // ----------------------------------------------------------------
+    const laporanKurang = [];
+
+    icd9List.forEach(function (icd9) {
+        if (ICD9_PEMERIKSAAN_DASAR.includes(icd9) || icd9.startsWith('95.0')) return;
+        if (ICD9_TRIGGER_005.has(icd9)) return; // penunjang → tidak butuh laporan
+
+        const namaLaporan = ICD9_TO_LAPORAN[icd9];
+        if (!namaLaporan) return; // null atau tidak ada mapping → skip
+
+        // Cek apakah laporan ini sudah ada di laporanInputList (case-insensitive)
+        const sudahDiisi = laporanInputList.some(function (l) {
+            return l.trim().toLowerCase() === namaLaporan.toLowerCase();
+        });
+
+        // Hindari duplikat pesan jika 2 ICD-9 mapping ke nama laporan yang sama
+        if (!sudahDiisi && !laporanKurang.includes(namaLaporan)) {
+            laporanKurang.push(namaLaporan);
+        }
+    });
+
+    laporanKurang.forEach(function (nama) {
+        messages.push('Laporan "' + nama + '" belum diisi');
+    });
+
+    // ----------------------------------------------------------------
+    // STEP 6: VALIDASI RESUME
+    // Wajib untuk bedah mayor (OK) — bukan tindakan poli
     // ----------------------------------------------------------------
     const adaBedahMayor = icd9List.some(k => ICD9_BEDAH_MAYOR.has(k));
 
@@ -435,8 +535,10 @@ function validasiKelengkapanPoliMata(payload) {
             unitKode,
             isRuangOperasi,
             berkasWajib,
-            berkasUploaded:  berkasUploadedList,
+            berkasUploaded:   berkasUploadedList,
             berkasKurang,
+            laporanDiisi:     laporanInputList,
+            laporanKurang,
             adaBedahMayor,
             adaBPJS0001,
             icd9TidakTerbilling,
